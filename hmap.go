@@ -56,19 +56,20 @@ func (e *entry) storeNext(next *entry) {
 	atomic.StorePointer(&e.next, unsafe.Pointer(next))
 }
 
-// findEntry returns the entry with the given key and true if the key exists.
-// Otherwise, it returns the entry at the end of the current bucket and false.
-func (m *Map) findEntry(key interface{}) (e *entry, ok bool) {
+// findEntry returns the bucket and the entry with the given key and true if
+// the key exists. Otherwise, it returns the bucket with the given key, the
+// entry at the end of the bucket and false.
+func (m *Map) findEntry(key interface{}) (b *bucket, e *entry, ok bool) {
 	i := m.hashFun(key)
-	b := m.buckets[i]
+	b = m.buckets[i]
 	e = b.loadFirst()
 	for e.key != key && e.next != nil {
 		e = e.loadNext()
 	}
 	if e.key == key {
-		return e, true
+		return b, e, true
 	}
-	return e, false
+	return b, e, false
 }
 
 // NewMap returns an empty hash map that maintain the number cap of buckets.
@@ -86,7 +87,7 @@ func NewMap(cap uint32) (m *Map) {
 // Load returns the value associated with the given key and true if the key
 // exists. Otherwise, it returns nil and false.
 func (m *Map) Load(key interface{}) (value interface{}, ok bool) {
-	if e, ok := m.findEntry(key); ok {
+	if _, e, ok := m.findEntry(key); ok {
 		if v := e.loadValue(); v != deleted {
 			return v, true
 		}
@@ -96,20 +97,38 @@ func (m *Map) Load(key interface{}) (value interface{}, ok bool) {
 
 // Store sets the given value to the given key.
 func (m *Map) Store(key, value interface{}) {
-	if e, ok := m.findEntry(key); ok {
+	if _, e, ok := m.findEntry(key); ok {
 		e.storeValue(value)
 	} else {
-		m.NumOfEntries++
 		newEntry := &entry{key: key}
 		newEntry.storeValue(value)
 		e.storeNext(newEntry)
+
+		n := atomic.LoadUint32(&m.NumOfEntries)
+		atomic.StoreUint32(&m.NumOfEntries, n+1)
 	}
 }
 
 // Delete logically removes the given key and its associated value.
 func (m *Map) Delete(key interface{}) {
-	if e, ok := m.findEntry(key); ok {
+	if b, e, ok := m.findEntry(key); ok {
 		e.storeValue(deleted) // logical delete
+
+		if b.loadFirst() == e {
+			b.storeFirst(e.loadNext())
+		} else {
+			prev := b.loadFirst()
+			curr := prev.loadNext()
+			for curr != e {
+				prev = curr
+				curr = curr.loadNext()
+			}
+			next := curr.loadNext()
+			prev.storeValue(next)
+		}
+
+		n := atomic.LoadUint32(&m.NumOfEntries)
+		atomic.StoreUint32(&m.NumOfEntries, n-1)
 	}
 }
 
@@ -118,7 +137,11 @@ func (m *Map) Delete(key interface{}) {
 func (m *Map) Range(f func(key, value interface{}) bool) {
 	for _, b := range m.buckets {
 		for e := b.loadFirst(); e.next != nil; e = e.loadNext() {
-			f(e.key, e.loadValue())
+			v := e.loadValue()
+			if v == deleted {
+				continue
+			}
+			f(e.key, v)
 		}
 	}
 }
