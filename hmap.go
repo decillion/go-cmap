@@ -13,16 +13,31 @@ import (
 // synchronization. Store and Delete are update operations and Load is a read
 // operation.
 type Map struct {
-	NumOfBuckets uint
-	NumOfEntries uint
-	hashFun      func(key interface{}) (hash uint)
-	buckets      []*entry
+	NumOfBuckets uint32
+	NumOfEntries uint32
+	hashFun      func(key interface{}) (hash uint32)
+	buckets      []*bucket
+}
+
+type bucket struct {
+	size  uint32
+	first unsafe.Pointer
 }
 
 type entry struct {
 	key   interface{}
 	value unsafe.Pointer // *interface{}
 	next  unsafe.Pointer // *entry
+}
+
+var deleted = unsafe.Pointer(new(interface{}))
+
+func (b *bucket) loadFirst() (first *entry) {
+	return (*entry)(atomic.LoadPointer(&b.first))
+}
+
+func (b *bucket) storeFirst(first *entry) {
+	atomic.StorePointer(&b.first, unsafe.Pointer(first))
 }
 
 func (e *entry) loadValue() (value interface{}) {
@@ -44,7 +59,9 @@ func (e *entry) storeNext(next *entry) {
 // findEntry returns the entry with the given key and true if the key exists.
 // Otherwise, it returns the entry at the end of the current bucket and false.
 func (m *Map) findEntry(key interface{}) (e *entry, ok bool) {
-	e = m.buckets[m.hashFun(key)%m.NumOfBuckets]
+	i := m.hashFun(key)
+	b := m.buckets[i]
+	e = b.loadFirst()
 	for e.key != key && e.next != nil {
 		e = e.loadNext()
 	}
@@ -55,11 +72,14 @@ func (m *Map) findEntry(key interface{}) (e *entry, ok bool) {
 }
 
 // NewMap returns an empty hash map that maintain the number cap of buckets.
-func NewMap(cap uint) (m *Map) {
+func NewMap(cap uint32) (m *Map) {
+	newHasher := func(key interface{}) uint32 {
+		return fnvHasher(key) % m.NumOfBuckets
+	}
 	return &Map{
 		NumOfBuckets: cap,
-		hashFun:      fnvHasher,
-		buckets:      make([]*entry, cap),
+		hashFun:      newHasher,
+		buckets:      make([]*bucket, cap),
 	}
 }
 
@@ -67,8 +87,7 @@ func NewMap(cap uint) (m *Map) {
 // exists. Otherwise, it returns nil and false.
 func (m *Map) Load(key interface{}) (value interface{}, ok bool) {
 	if e, ok := m.findEntry(key); ok {
-		if v := e.loadValue(); v != e {
-			// v == e means the key is logically deleted.
+		if v := e.loadValue(); v != deleted {
 			return v, true
 		}
 	}
@@ -90,7 +109,7 @@ func (m *Map) Store(key, value interface{}) {
 // Delete logically removes the given key and its associated value.
 func (m *Map) Delete(key interface{}) {
 	if e, ok := m.findEntry(key); ok {
-		e.storeValue(e) // logical delete
+		e.storeValue(deleted) // logical delete
 	}
 }
 
@@ -98,7 +117,7 @@ func (m *Map) Delete(key interface{}) {
 // the function returns false.
 func (m *Map) Range(f func(key, value interface{}) bool) {
 	for _, b := range m.buckets {
-		for e := b; e.next != nil; e = e.loadNext() {
+		for e := b.loadFirst(); e.next != nil; e = e.loadNext() {
 			f(e.key, e.loadValue())
 		}
 	}
