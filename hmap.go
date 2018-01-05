@@ -16,7 +16,7 @@ type Map struct {
 	numOfBuckets uint32
 	numOfEntries uint32
 	hashFun      func(key interface{}) (hash uint32)
-	buckets      []bucket
+	buckets      []*bucket
 }
 
 // NumOfBuckets returns the number of buckets in the map.
@@ -42,11 +42,11 @@ type entry struct {
 
 var deleted = unsafe.Pointer(new(interface{}))
 
-func (b bucket) loadFirst() (first *entry) {
+func (b *bucket) loadFirst() (first *entry) {
 	return (*entry)(atomic.LoadPointer(&b.first))
 }
 
-func (b bucket) storeFirst(first *entry) {
+func (b *bucket) storeFirst(first *entry) {
 	atomic.StorePointer(&b.first, unsafe.Pointer(first))
 }
 
@@ -69,7 +69,7 @@ func (e *entry) storeNext(next *entry) {
 // findEntry returns the bucket and the entry with the given key and true if
 // the key exists. Otherwise, it returns the bucket with the given key, the
 // entry at the end of the bucket (nil if no entry) and false.
-func (m *Map) findEntry(key interface{}) (b bucket, e *entry, ok bool) {
+func (m *Map) findEntry(key interface{}) (b *bucket, e *entry, ok bool) {
 	i := m.hashFun(key)
 	b = m.buckets[i]
 	e = b.loadFirst()
@@ -91,10 +91,15 @@ func NewMap(cap uint32) (m *Map) {
 	hasher := func(key interface{}) uint32 {
 		return fnvHasher(key) % m.numOfBuckets
 	}
+	buckets := make([]*bucket, cap)
+	for i := uint32(0); i < cap; i++ {
+		buckets[i] = &bucket{}
+	}
+
 	return &Map{
 		numOfBuckets: cap,
 		hashFun:      hasher,
-		buckets:      make([]bucket, cap),
+		buckets:      buckets,
 	}
 }
 
@@ -115,10 +120,11 @@ func (m *Map) Store(key, value interface{}) {
 		e.storeValue(value)
 	} else {
 		m.numOfEntries++
+		b.size++
 		newEntry := &entry{key: key}
 		newEntry.storeValue(value)
 
-		if b.loadFirst() == nil {
+		if e == nil {
 			b.storeFirst(newEntry)
 		} else {
 			e.storeNext(newEntry)
@@ -129,7 +135,7 @@ func (m *Map) Store(key, value interface{}) {
 // Delete logically removes the given key and its associated value.
 func (m *Map) Delete(key interface{}) {
 	if b, e, ok := m.findEntry(key); ok {
-		m.numOfEntries++
+		m.numOfEntries--
 		e.storeValue(deleted) // logical delete
 
 		if b.loadFirst() == e {
