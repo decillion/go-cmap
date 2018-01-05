@@ -10,13 +10,23 @@ import (
 // Map is a non-resizable hash map. A single update operation and multiple read
 // operations can be executed concurrently on the map, while multiple update
 // operations cannot. In other words, only update operations need an external
-// synchronization. Store and Delete are update operations and Load is a read
-// operation.
+// synchronization. Store and Delete are update operations and Load, NumOfBuckets,
+// and NumOfEntries are read operations.
 type Map struct {
-	NumOfBuckets uint32
-	NumOfEntries uint32
+	numOfBuckets uint32
+	numOfEntries uint32
 	hashFun      func(key interface{}) (hash uint32)
 	buckets      []*bucket
+}
+
+// NumOfBuckets returns the number of buckets.
+func (m *Map) NumOfBuckets() uint32 {
+	return atomic.LoadUint32(&m.numOfBuckets)
+}
+
+// NumOfEntries returns the number of keys.
+func (m *Map) NumOfEntries() uint32 {
+	return atomic.LoadUint32(&m.numOfEntries)
 }
 
 type bucket struct {
@@ -74,12 +84,12 @@ func (m *Map) findEntry(key interface{}) (b *bucket, e *entry, ok bool) {
 
 // NewMap returns an empty hash map that maintain the number cap of buckets.
 func NewMap(cap uint32) (m *Map) {
-	newHasher := func(key interface{}) uint32 {
-		return fnvHasher(key) % m.NumOfBuckets
+	hasher := func(key interface{}) uint32 {
+		return fnvHasher(key) % m.numOfBuckets
 	}
 	return &Map{
-		NumOfBuckets: cap,
-		hashFun:      newHasher,
+		numOfBuckets: cap,
+		hashFun:      hasher,
 		buckets:      make([]*bucket, cap),
 	}
 }
@@ -104,8 +114,8 @@ func (m *Map) Store(key, value interface{}) {
 		newEntry.storeValue(value)
 		e.storeNext(newEntry)
 
-		n := atomic.LoadUint32(&m.NumOfEntries)
-		atomic.StoreUint32(&m.NumOfEntries, n+1)
+		n := atomic.LoadUint32(&m.numOfEntries)
+		atomic.StoreUint32(&m.numOfEntries, n+1)
 	}
 }
 
@@ -127,8 +137,8 @@ func (m *Map) Delete(key interface{}) {
 			prev.storeValue(next)
 		}
 
-		n := atomic.LoadUint32(&m.NumOfEntries)
-		atomic.StoreUint32(&m.NumOfEntries, n-1)
+		n := atomic.LoadUint32(&m.numOfEntries)
+		atomic.StoreUint32(&m.numOfEntries, n-1)
 	}
 }
 
