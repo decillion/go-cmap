@@ -10,23 +10,23 @@ import (
 // Map is a non-resizable hash map. A single update operation and multiple read
 // operations can be executed concurrently on the map, while multiple update
 // operations cannot. In other words, only update operations need an external
-// synchronization. Store and Delete are update operations and Load, NumOfBuckets,
-// and NumOfEntries are read operations.
+// synchronization. Store and Delete are update operations and Load is a read
+// operation.
 type Map struct {
 	numOfBuckets uint32
 	numOfEntries uint32
 	hashFun      func(key interface{}) (hash uint32)
-	buckets      []*bucket
+	buckets      []bucket
 }
 
-// NumOfBuckets returns the number of buckets.
-func (m *Map) NumOfBuckets() uint32 {
-	return atomic.LoadUint32(&m.numOfBuckets)
+// NumOfBuckets returns the number of buckets in the map.
+func NumOfBuckets(m *Map) uint32 {
+	return m.numOfBuckets
 }
 
-// NumOfEntries returns the number of keys.
-func (m *Map) NumOfEntries() uint32 {
-	return atomic.LoadUint32(&m.numOfEntries)
+// NumOfEntries returns the number of keys in the map.
+func NumOfEntries(m *Map) uint32 {
+	return m.numOfEntries
 }
 
 type bucket struct {
@@ -42,11 +42,11 @@ type entry struct {
 
 var deleted = unsafe.Pointer(new(interface{}))
 
-func (b *bucket) loadFirst() (first *entry) {
+func (b bucket) loadFirst() (first *entry) {
 	return (*entry)(atomic.LoadPointer(&b.first))
 }
 
-func (b *bucket) storeFirst(first *entry) {
+func (b bucket) storeFirst(first *entry) {
 	atomic.StorePointer(&b.first, unsafe.Pointer(first))
 }
 
@@ -68,11 +68,15 @@ func (e *entry) storeNext(next *entry) {
 
 // findEntry returns the bucket and the entry with the given key and true if
 // the key exists. Otherwise, it returns the bucket with the given key, the
-// entry at the end of the bucket and false.
-func (m *Map) findEntry(key interface{}) (b *bucket, e *entry, ok bool) {
+// entry at the end of the bucket (nil if no entry) and false.
+func (m *Map) findEntry(key interface{}) (b bucket, e *entry, ok bool) {
 	i := m.hashFun(key)
 	b = m.buckets[i]
 	e = b.loadFirst()
+
+	if e == nil {
+		return b, nil, false
+	}
 	for e.key != key && e.next != nil {
 		e = e.loadNext()
 	}
@@ -90,7 +94,7 @@ func NewMap(cap uint32) (m *Map) {
 	return &Map{
 		numOfBuckets: cap,
 		hashFun:      hasher,
-		buckets:      make([]*bucket, cap),
+		buckets:      make([]bucket, cap),
 	}
 }
 
@@ -107,21 +111,25 @@ func (m *Map) Load(key interface{}) (value interface{}, ok bool) {
 
 // Store sets the given value to the given key.
 func (m *Map) Store(key, value interface{}) {
-	if _, e, ok := m.findEntry(key); ok {
+	if b, e, ok := m.findEntry(key); ok {
 		e.storeValue(value)
 	} else {
+		m.numOfEntries++
 		newEntry := &entry{key: key}
 		newEntry.storeValue(value)
-		e.storeNext(newEntry)
 
-		n := atomic.LoadUint32(&m.numOfEntries)
-		atomic.StoreUint32(&m.numOfEntries, n+1)
+		if b.loadFirst() == nil {
+			b.storeFirst(newEntry)
+		} else {
+			e.storeNext(newEntry)
+		}
 	}
 }
 
 // Delete logically removes the given key and its associated value.
 func (m *Map) Delete(key interface{}) {
 	if b, e, ok := m.findEntry(key); ok {
+		m.numOfEntries++
 		e.storeValue(deleted) // logical delete
 
 		if b.loadFirst() == e {
@@ -136,17 +144,15 @@ func (m *Map) Delete(key interface{}) {
 			next := curr.loadNext()
 			prev.storeValue(next)
 		}
-
-		n := atomic.LoadUint32(&m.numOfEntries)
-		atomic.StoreUint32(&m.numOfEntries, n-1)
 	}
 }
 
 // Range iteratively applies the given function to each key-value pair until
-// the function returns false.
+// the function returns false. If the function f contains update operations,
+// each of them needs an external synchronization.
 func (m *Map) Range(f func(key, value interface{}) bool) {
 	for _, b := range m.buckets {
-		for e := b.loadFirst(); e.next != nil; e = e.loadNext() {
+		for e := b.loadFirst(); e != nil; e = e.loadNext() {
 			v := e.loadValue()
 			if v == deleted {
 				continue
