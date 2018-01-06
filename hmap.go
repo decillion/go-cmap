@@ -39,7 +39,10 @@ type entry struct {
 	next  unsafe.Pointer // *entry
 }
 
-var deleted = unsafe.Pointer(new(interface{}))
+var (
+	deleted  = unsafe.Pointer(new(interface{}))
+	terminal = unsafe.Pointer(new(interface{}))
+)
 
 func (b *bucket) loadFirst() (first *entry) {
 	return (*entry)(atomic.LoadPointer(&b.first))
@@ -67,16 +70,13 @@ func (e *entry) storeNext(next *entry) {
 
 // findEntry returns the bucket and the entry with the given key and true if
 // the key exists. Otherwise, it returns the bucket with the given key, the
-// entry at the end of the bucket (nil if no entry) and false.
+// sentinel entry, and false.
 func (m *Map) findEntry(key interface{}) (b *bucket, e *entry, ok bool) {
 	i := m.hasher(key) % m.numOfBuckets
 	b = m.buckets[i]
 	e = b.loadFirst()
-	if e == nil {
-		return b, nil, false
-	}
 
-	for e.key != key && e.loadNext() != nil {
+	for e.key != key && e.key != terminal {
 		e = e.loadNext()
 	}
 	if e.key == key {
@@ -91,6 +91,8 @@ func NewMap(cap uint32, hasher func(key interface{}) uint32) (m *Map) {
 	buckets := make([]*bucket, cap)
 	for i := uint32(0); i < cap; i++ {
 		buckets[i] = &bucket{}
+		sentinel := &entry{key: terminal}
+		buckets[i].storeFirst(sentinel)
 	}
 
 	return &Map{
@@ -119,12 +121,8 @@ func (m *Map) Store(key, value interface{}) {
 		m.numOfEntries++
 		newEntry := &entry{key: key}
 		newEntry.storeValue(value)
-
-		if e == nil {
-			b.storeFirst(newEntry)
-		} else {
-			e.storeNext(newEntry)
-		}
+		newEntry.storeNext(b.loadFirst())
+		b.storeFirst(newEntry)
 	}
 }
 
