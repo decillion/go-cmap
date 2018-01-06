@@ -16,7 +16,7 @@ type Map struct {
 	numOfBuckets uint32
 	numOfEntries uint32
 	hashFun      func(key interface{}) (hash uint32)
-	buckets      []*bucket
+	buckets      []bucket
 }
 
 // NumOfBuckets returns the number of buckets in the map.
@@ -30,7 +30,6 @@ func NumOfEntries(m *Map) uint32 {
 }
 
 type bucket struct {
-	size  uint32
 	first unsafe.Pointer
 }
 
@@ -71,13 +70,13 @@ func (e *entry) storeNext(next *entry) {
 // entry at the end of the bucket (nil if no entry) and false.
 func (m *Map) findEntry(key interface{}) (b *bucket, e *entry, ok bool) {
 	i := m.hashFun(key)
-	b = m.buckets[i]
+	b = &m.buckets[i]
 	e = b.loadFirst()
 
 	if e == nil {
 		return b, nil, false
 	}
-	for e.key != key && e.next != nil {
+	for e.key != key && e.loadNext() != nil {
 		e = e.loadNext()
 	}
 	if e.key == key {
@@ -91,15 +90,11 @@ func NewMap(cap uint32) (m *Map) {
 	hasher := func(key interface{}) uint32 {
 		return fnvHasher(key) % m.numOfBuckets
 	}
-	buckets := make([]*bucket, cap)
-	for i := uint32(0); i < cap; i++ {
-		buckets[i] = &bucket{}
-	}
 
 	return &Map{
 		numOfBuckets: cap,
 		hashFun:      hasher,
-		buckets:      buckets,
+		buckets:      make([]bucket, cap),
 	}
 }
 
@@ -120,7 +115,6 @@ func (m *Map) Store(key, value interface{}) {
 		e.storeValue(value)
 	} else {
 		m.numOfEntries++
-		b.size++
 		newEntry := &entry{key: key}
 		newEntry.storeValue(value)
 
