@@ -13,10 +13,10 @@ import (
 // synchronization. Store and Delete are update operations and Load and Range
 // are read operations.
 type Map struct {
+	hasher       func(key interface{}) (hash uint32)
+	buckets      []*bucket
 	numOfBuckets uint32
 	numOfEntries uint32
-	hashFun      func(key interface{}) (hash uint32)
-	buckets      []*bucket
 }
 
 // NumOfBuckets returns the number of buckets in the map.
@@ -69,7 +69,7 @@ func (e *entry) storeNext(next *entry) {
 // the key exists. Otherwise, it returns the bucket with the given key, the
 // entry at the end of the bucket (nil if no entry) and false.
 func (m *Map) findEntry(key interface{}) (b *bucket, e *entry, ok bool) {
-	i := m.hashFun(key)
+	i := m.hasher(key) % m.numOfBuckets
 	b = m.buckets[i]
 	e = b.loadFirst()
 	if e == nil {
@@ -86,10 +86,8 @@ func (m *Map) findEntry(key interface{}) (b *bucket, e *entry, ok bool) {
 }
 
 // NewMap returns an empty hash map that maintain the number cap of buckets.
+// The map uses the given hash function internally.
 func NewMap(cap uint32, hasher func(key interface{}) uint32) (m *Map) {
-	hashFun := func(key interface{}) uint32 {
-		return hasher(key) % m.numOfBuckets
-	}
 	buckets := make([]*bucket, cap)
 	for i := uint32(0); i < cap; i++ {
 		buckets[i] = &bucket{}
@@ -97,7 +95,7 @@ func NewMap(cap uint32, hasher func(key interface{}) uint32) (m *Map) {
 
 	return &Map{
 		numOfBuckets: cap,
-		hashFun:      hashFun,
+		hasher:       hasher,
 		buckets:      buckets,
 	}
 }
