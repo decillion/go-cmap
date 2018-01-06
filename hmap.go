@@ -10,8 +10,8 @@ import (
 // Map is a non-resizable hash map. A single update operation and multiple read
 // operations can be executed concurrently on the map, while multiple update
 // operations cannot. In other words, only update operations need an external
-// synchronization. Store and Delete are update operations and Load is a read
-// operation.
+// synchronization. Store and Delete are update operations and Load and Range
+// are read operations.
 type Map struct {
 	numOfBuckets uint32
 	numOfEntries uint32
@@ -86,9 +86,9 @@ func (m *Map) findEntry(key interface{}) (b *bucket, e *entry, ok bool) {
 }
 
 // NewMap returns an empty hash map that maintain the number cap of buckets.
-func NewMap(cap uint32) (m *Map) {
-	hasher := func(key interface{}) uint32 {
-		return fnvHasher(key) % m.numOfBuckets
+func NewMap(cap uint32, hasher func(key interface{}) uint32) (m *Map) {
+	hashFun := func(key interface{}) uint32 {
+		return hasher(key) % m.numOfBuckets
 	}
 	buckets := make([]*bucket, cap)
 	for i := uint32(0); i < cap; i++ {
@@ -97,7 +97,7 @@ func NewMap(cap uint32) (m *Map) {
 
 	return &Map{
 		numOfBuckets: cap,
-		hashFun:      hasher,
+		hashFun:      hashFun,
 		buckets:      buckets,
 	}
 }
@@ -152,8 +152,7 @@ func (m *Map) Delete(key interface{}) {
 }
 
 // Range iteratively applies the given function to each key-value pair until
-// the function returns false. If the function contains update operations,
-// each of them needs an external synchronization.
+// the function returns false.
 func (m *Map) Range(f func(key, value interface{}) bool) {
 	for _, b := range m.buckets {
 		for e := b.loadFirst(); e != nil; e = e.loadNext() {
