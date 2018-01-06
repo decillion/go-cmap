@@ -17,7 +17,7 @@ type Map struct {
 	buckets      []*bucket
 	numOfBuckets uint32
 	numOfEntries uint32
-	NumOfDeleted uint32
+	numOfDeleted uint32
 }
 
 // NumOfBuckets returns the number of buckets in the map.
@@ -33,7 +33,7 @@ func NumOfEntries(m *Map) uint32 {
 
 // NumOfDeleted returns the number of logically deleted keys.
 func NumOfDeleted(m *Map) uint32 {
-	return m.NumOfDeleted
+	return m.numOfDeleted
 }
 
 type bucket struct {
@@ -127,7 +127,7 @@ func (m *Map) Load(key interface{}) (value interface{}, ok bool) {
 func (m *Map) Store(key, value interface{}) {
 	if b, e, ok := m.findEntry(key); ok {
 		if v := e.loadValue(); v == deleted {
-			m.NumOfDeleted--
+			m.numOfDeleted--
 		}
 		e.storeValue(value) // linearization point
 	} else {
@@ -142,7 +142,9 @@ func (m *Map) Store(key, value interface{}) {
 // Delete logically removes the given key and its associated value.
 func (m *Map) Delete(key interface{}) {
 	if _, e, ok := m.findEntry(key); ok {
-		m.NumOfDeleted++
+		if v := e.loadValue(); v != deleted {
+			m.numOfDeleted++
+		}
 		e.storeValue(deleted) // linearization point
 	}
 }
