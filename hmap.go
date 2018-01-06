@@ -37,7 +37,7 @@ func NumOfDeleted(m *Map) uint32 {
 }
 
 type bucket struct {
-	first unsafe.Pointer
+	first unsafe.Pointer // *entry
 }
 
 type entry struct {
@@ -75,23 +75,6 @@ func (e *entry) storeNext(next *entry) {
 	atomic.StorePointer(&e.next, unsafe.Pointer(next))
 }
 
-// findEntry returns the bucket and the entry with the given key and true if
-// the key exists. Otherwise, it returns the bucket with the given key, the
-// sentinel entry, and false.
-func (m *Map) findEntry(key interface{}) (b *bucket, e *entry, ok bool) {
-	i := m.hasher(key) % m.numOfBuckets
-	b = m.buckets[i]
-	e = b.loadFirst()
-
-	for e.key != key && e.key != terminal {
-		e = e.loadNext()
-	}
-	if e.key == key {
-		return b, e, true
-	}
-	return b, e, false
-}
-
 // NewMap returns an empty hash map that maintain the number cap of buckets.
 // The map uses the given hash function internally.
 func NewMap(cap uint32, hasher func(key interface{}) uint32) (m *Map) {
@@ -107,6 +90,23 @@ func NewMap(cap uint32, hasher func(key interface{}) uint32) (m *Map) {
 		hasher:       hasher,
 		buckets:      buckets,
 	}
+}
+
+// findEntry returns the bucket and the entry with the given key and true if
+// the key exists. Otherwise, it returns the bucket with the given key, the
+// sentinel entry, and false.
+func (m *Map) findEntry(key interface{}) (b *bucket, e *entry, ok bool) {
+	i := m.hasher(key) % m.numOfBuckets
+	b = m.buckets[i]
+	e = b.loadFirst()
+
+	for e.key != key && e.key != terminal {
+		e = e.loadNext()
+	}
+	if e.key == key {
+		return b, e, true
+	}
+	return b, e, false
 }
 
 // Load returns the value associated with the given key and true if the key
