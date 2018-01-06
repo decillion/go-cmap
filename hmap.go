@@ -153,7 +153,7 @@ func (m *Map) Delete(key interface{}) {
 // the function returns false.
 func (m *Map) Range(f func(key, value interface{}) bool) {
 	for _, b := range m.buckets {
-		for e := b.loadFirst(); e != nil; e = e.loadNext() {
+		for e := b.loadFirst(); e.key != terminal; e = e.loadNext() {
 			v := e.loadValue()
 			if v == deleted {
 				continue
