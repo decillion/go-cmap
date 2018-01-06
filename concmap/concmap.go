@@ -1,3 +1,5 @@
+// Package concmap implements a concurrent map. The interface of the map mimics
+// one of sync.Map.
 package concmap
 
 import (
@@ -5,36 +7,43 @@ import (
 	"sync/atomic"
 
 	"github.com/OneOfOne/cmap/hashers"
-	hmap "github.com/decillion/go-hmap"
+	"github.com/decillion/go-hmap"
 )
 
 const (
-	iniMapCapacity   = 1 << 4
-	minimumMapSize   = 1 << 6
-	lowerThreshold   = 2
-	mediumLoadFactor = 4
-	upperThreshold   = 6
+	iniMapCap  = 1 << 4
+	minMapSize = 1 << 6
+	lowerBound = 2
+	defaultLF  = 4
+	upperBound = 6
 )
 
 var hasher = hashers.TypeHasher32
 
+// Map is a concurrent that can be safely accessed by multiple goroutines.
+// It is strongly discouraged to use keys of non-built-in types because
+// the current hash function does not perform well on such keys.
 type Map struct {
 	hm atomic.Value // *hmap.Map
 	mu sync.Mutex
 }
 
+// NewMap returns an empty map. Map must be created via this function.
 func NewMap() (m *Map) {
 	m = &Map{}
-	h := hmap.NewMap(iniMapCapacity, hasher)
+	h := hmap.NewMap(iniMapCap, hasher)
 	m.hm.Store(h)
 	return
 }
 
+// Load returns the value stored in the map for a key, or nil if no value is
+// present. The ok result indicates whether value was found in the map.
 func (m *Map) Load(key interface{}) (value interface{}, ok bool) {
 	h := m.hm.Load().(*hmap.Map)
 	return h.Load(key)
 }
 
+// Store sets the value for a key.
 func (m *Map) Store(key, value interface{}) {
 	m.mu.Lock()
 	h := m.hm.Load().(*hmap.Map)
@@ -43,6 +52,9 @@ func (m *Map) Store(key, value interface{}) {
 	m.mu.Unlock()
 }
 
+// LoadOrStore returns the existing value for the key if present. Otherwise,
+// it stores and returns the given value. The loaded result is true if the
+// value was loaded, false if stored.
 func (m *Map) LoadOrStore(key, value interface{}) (actual interface{}, loaded bool) {
 	h := m.hm.Load().(*hmap.Map)
 	actual, loaded = h.Load(key)
@@ -63,6 +75,7 @@ func (m *Map) LoadOrStore(key, value interface{}) (actual interface{}, loaded bo
 	return value, false
 }
 
+// Delete deletes the value for a key.
 func (m *Map) Delete(key interface{}) {
 	m.mu.Lock()
 	h := m.hm.Load().(*hmap.Map)
@@ -71,6 +84,13 @@ func (m *Map) Delete(key interface{}) {
 	m.mu.Unlock()
 }
 
+// Range calls f sequentially for each key and value present in the map. If f
+// returns false, range stops the iteration.
+//
+// Range does not necessarily correspond to any consistent snapshot of the
+// Map's contents: no key will be visited more than once, but if the value for
+// any key is stored or deleted concurrently, Range may reflect any mapping for
+// that key from any point during the Range call.
 func (m *Map) Range(f func(key, value interface{}) bool) {
 	h := m.hm.Load().(*hmap.Map)
 	h.Range(f)
@@ -89,15 +109,15 @@ func resizeMap(m *Map) {
 	realEntries := entries - deleted
 	loadFactor := float32(entries) / float32(buckets)
 
-	if entries < minimumMapSize {
+	if entries < minMapSize {
 		return
 	}
-	tooSmallBuckets := loadFactor > upperThreshold
-	tooLargeBuckets := loadFactor < lowerThreshold && entries > minimumMapSize
+	tooSmallBuckets := loadFactor > upperBound
+	tooLargeBuckets := loadFactor < lowerBound && entries > minMapSize
 	tooManyDeleted := entries < 2*deleted
 	shouldResize := tooSmallBuckets || tooLargeBuckets || tooManyDeleted
 	if shouldResize {
-		newCapacity := max(realEntries/mediumLoadFactor, iniMapCapacity)
+		newCapacity := max(realEntries/defaultLF, iniMapCap)
 		newHMap := hmap.NewMap(newCapacity, hasher)
 		m.hm.Store(newHMap)
 	}
