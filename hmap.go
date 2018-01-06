@@ -17,6 +17,7 @@ type Map struct {
 	buckets      []*bucket
 	numOfBuckets uint32
 	numOfEntries uint32
+	NumOfDeleted uint32
 }
 
 // NumOfBuckets returns the number of buckets in the map.
@@ -24,9 +25,15 @@ func NumOfBuckets(m *Map) uint32 {
 	return m.numOfBuckets
 }
 
-// NumOfEntries returns the number of keys in the map.
+// NumOfEntries returns the number of keys in the map. It counts logically
+// deleted entries.
 func NumOfEntries(m *Map) uint32 {
 	return m.numOfEntries
+}
+
+// NumOfDeleted returns the number of logically deleted keys.
+func NumOfDeleted(m *Map) uint32 {
+	return m.NumOfDeleted
 }
 
 type bucket struct {
@@ -112,19 +119,16 @@ func (m *Map) Load(key interface{}) (value interface{}, ok bool) {
 	}
 	return nil, false
 	// The linearization point of Load should be taken as the folowing:
-	// 1. If ok == true,
-	// 	A. If v != deleted, take the point of e.loadValue();
-	// 	B. If v == deleted, take the point just after storeValue(deleted);
-	// 2. If ok != true,
-	//	A. If the key doesn't exist at the instance of b.loadFirst() in
-	//		findNode(),	take the very point;
-	//	B. otherwise, take the point just after the most recent Delete(key)
-	//		after the instance of b.loadFirst().
+	// 1. If ok == true, take the point of e.loadValue();
+	// 2. If ok != true, take the point of the invocation of Load.
 }
 
 // Store sets the given value to the given key.
 func (m *Map) Store(key, value interface{}) {
 	if b, e, ok := m.findEntry(key); ok {
+		if v := e.loadValue(); v == deleted {
+			m.NumOfDeleted--
+		}
 		e.storeValue(value) // linearization point
 	} else {
 		m.numOfEntries++
@@ -137,22 +141,9 @@ func (m *Map) Store(key, value interface{}) {
 
 // Delete logically removes the given key and its associated value.
 func (m *Map) Delete(key interface{}) {
-	if b, e, ok := m.findEntry(key); ok {
-		m.numOfEntries--
-		e.storeValue(deleted) // linearization point (logical delete)
-
-		if b.loadFirst() == e {
-			b.storeFirst(e.loadNext())
-		} else {
-			prev := b.loadFirst()
-			curr := prev.loadNext()
-			for curr != e {
-				prev = curr
-				curr = curr.loadNext()
-			}
-			next := curr.loadNext()
-			prev.storeNext(next)
-		}
+	if _, e, ok := m.findEntry(key); ok {
+		m.NumOfDeleted++
+		e.storeValue(deleted) // linearization point
 	}
 }
 
