@@ -70,8 +70,8 @@ func (m *Map) LoadOrStore(key, value interface{}) (actual interface{}, loaded bo
 		return
 	}
 	h.Store(key, value)
+	resizeMap(m)
 	m.mu.Unlock()
-	// Do not resize here because this path is expensive.
 	return value, false
 }
 
@@ -113,7 +113,7 @@ func resizeMap(m *Map) {
 		return
 	}
 	tooSmallBuckets := loadFactor > upperBound
-	tooLargeBuckets := loadFactor < lowerBound && entries > minMapSize
+	tooLargeBuckets := loadFactor < lowerBound
 	tooManyDeleted := entries < 2*deleted
 	shouldResize := tooSmallBuckets || tooLargeBuckets || tooManyDeleted
 	if shouldResize {
