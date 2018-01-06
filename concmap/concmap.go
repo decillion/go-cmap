@@ -118,8 +118,15 @@ func resizeMap(m *Map) {
 	shouldResize := tooSmallBuckets || tooLargeBuckets || tooManyDeleted
 	if shouldResize {
 		newCapacity := max(realEntries/defaultLF, iniMapCap)
-		newHMap := hmap.NewMap(newCapacity, hasher)
-		m.hm.Store(newHMap)
+		newMap := hmap.NewMap(newCapacity, hasher)
+		oldMap := m.hm.Load().(*hmap.Map)
+		oldMap.Range(func(k, v interface{}) bool {
+			if v != deleted {
+				newMap.Store(k, v)
+			}
+			return true
+		})
+		m.hm.Store(newMap)
 	}
 }
 
