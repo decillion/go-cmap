@@ -111,18 +111,27 @@ func (m *Map) Load(key interface{}) (value interface{}, ok bool) {
 		}
 	}
 	return nil, false
+	// The linearization point of Load should be taken as the folowing:
+	// 1. If ok == true,
+	// 	A. If v != deleted, take the point of e.loadValue();
+	// 	B. If v == deleted, take the point just after storeValue(deleted);
+	// 2. If ok != true,
+	//	A. If the key doesn't exist at the instance of b.loadFirst() in
+	//		findNode(),	take the very point;
+	//	B. otherwise, take the point just after the most recent Delete(key)
+	//		after the instance of b.loadFirst().
 }
 
 // Store sets the given value to the given key.
 func (m *Map) Store(key, value interface{}) {
 	if b, e, ok := m.findEntry(key); ok {
-		e.storeValue(value)
+		e.storeValue(value) // linearization point
 	} else {
 		m.numOfEntries++
 		newEntry := &entry{key: key}
 		newEntry.storeValue(value)
 		newEntry.storeNext(b.loadFirst())
-		b.storeFirst(newEntry)
+		b.storeFirst(newEntry) // linearization point
 	}
 }
 
@@ -130,7 +139,7 @@ func (m *Map) Store(key, value interface{}) {
 func (m *Map) Delete(key interface{}) {
 	if b, e, ok := m.findEntry(key); ok {
 		m.numOfEntries--
-		e.storeValue(deleted) // logical delete
+		e.storeValue(deleted) // linearization point (logical delete)
 
 		if b.loadFirst() == e {
 			b.storeFirst(e.loadNext())
