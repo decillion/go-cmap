@@ -146,7 +146,7 @@ func (m *Map) Delete(key interface{}) {
 				curr = curr.loadNext()
 			}
 			next := curr.loadNext()
-			prev.storeValue(next)
+			prev.storeNext(next)
 		}
 	}
 }
