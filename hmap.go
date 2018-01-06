@@ -16,7 +16,7 @@ type Map struct {
 	numOfBuckets uint32
 	numOfEntries uint32
 	hashFun      func(key interface{}) (hash uint32)
-	buckets      []bucket
+	buckets      []*bucket
 }
 
 // NumOfBuckets returns the number of buckets in the map.
@@ -70,12 +70,12 @@ func (e *entry) storeNext(next *entry) {
 // entry at the end of the bucket (nil if no entry) and false.
 func (m *Map) findEntry(key interface{}) (b *bucket, e *entry, ok bool) {
 	i := m.hashFun(key)
-	b = &m.buckets[i]
+	b = m.buckets[i]
 	e = b.loadFirst()
-
 	if e == nil {
 		return b, nil, false
 	}
+
 	for e.key != key && e.loadNext() != nil {
 		e = e.loadNext()
 	}
@@ -90,11 +90,15 @@ func NewMap(cap uint32) (m *Map) {
 	hasher := func(key interface{}) uint32 {
 		return fnvHasher(key) % m.numOfBuckets
 	}
+	buckets := make([]*bucket, cap)
+	for i := uint32(0); i < cap; i++ {
+		buckets[i] = &bucket{}
+	}
 
 	return &Map{
 		numOfBuckets: cap,
 		hashFun:      hasher,
-		buckets:      make([]bucket, cap),
+		buckets:      buckets,
 	}
 }
 
@@ -148,7 +152,7 @@ func (m *Map) Delete(key interface{}) {
 }
 
 // Range iteratively applies the given function to each key-value pair until
-// the function returns false. If the function f contains update operations,
+// the function returns false. If the function contains update operations,
 // each of them needs an external synchronization.
 func (m *Map) Range(f func(key, value interface{}) bool) {
 	for _, b := range m.buckets {
