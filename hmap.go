@@ -15,14 +15,13 @@ import (
 type Map struct {
 	hasher       func(key interface{}) (hash uint32)
 	buckets      []*bucket
-	numOfBuckets uint32
 	numOfEntries uint32
 	numOfDeleted uint32
 }
 
 // NumOfBuckets returns the number of buckets in the map.
 func NumOfBuckets(m *Map) uint32 {
-	return m.numOfBuckets
+	return uint32(len(m.buckets))
 }
 
 // NumOfEntries returns the number of keys in the map. It counts logically
@@ -86,9 +85,8 @@ func NewMap(cap uint32, hasher func(key interface{}) uint32) (m *Map) {
 	}
 
 	return &Map{
-		numOfBuckets: cap,
-		hasher:       hasher,
-		buckets:      buckets,
+		hasher:  hasher,
+		buckets: buckets,
 	}
 }
 
@@ -96,7 +94,7 @@ func NewMap(cap uint32, hasher func(key interface{}) uint32) (m *Map) {
 // the key exists. Otherwise, it returns the bucket with the given key, the
 // sentinel entry, and false.
 func (m *Map) findEntry(key interface{}) (b *bucket, e *entry, ok bool) {
-	i := m.hasher(key) % m.numOfBuckets
+	i := m.hasher(key) % NumOfBuckets(m)
 	b = m.buckets[i]
 	e = b.loadFirst()
 
