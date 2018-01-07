@@ -13,30 +13,28 @@ import (
 // synchronization. Store and Delete are update operations and Load and Range
 // are read operations.
 type Map struct {
-	hasher       func(key interface{}) (hash uint32)
-	buckets      []*bucket
-	numOfEntries uint32
-	numOfDeleted uint32
+	hasher      func(key interface{}) (hash uint32)
+	buckets     []*bucket
+	statLargest uint32
+	statMapSize uint32
+	statDeleted uint32
 }
 
-// NumOfBuckets returns the number of buckets in the map.
-func NumOfBuckets(m *Map) uint32 {
-	return uint32(len(m.buckets))
+// StatBuckets returns the number of buckets and the number of keys in the
+// largest bucket.
+func (m *Map) StatBuckets() (capacity, largest uint32) {
+	return uint32(len(m.buckets)), m.statLargest
 }
 
-// NumOfEntries returns the number of keys in the map. It counts logically
-// deleted entries.
-func NumOfEntries(m *Map) uint32 {
-	return m.numOfEntries
-}
-
-// NumOfDeleted returns the number of logically deleted keys.
-func NumOfDeleted(m *Map) uint32 {
-	return m.numOfDeleted
+// StatEntries returns the number of keys physically existing in the map and
+// the number of logically deleted keys.
+func (m *Map) StatEntries() (mapSize, deleted uint32) {
+	return m.statMapSize, m.statDeleted
 }
 
 type bucket struct {
-	first unsafe.Pointer // *entry
+	first       unsafe.Pointer // *entry
+	statEntries uint32
 }
 
 type entry struct {
@@ -76,9 +74,9 @@ func (e *entry) storeNext(next *entry) {
 
 // NewMap returns an empty hash map that maintain the number cap of buckets.
 // The map uses the given hash function internally.
-func NewMap(cap uint32, hasher func(key interface{}) uint32) (m *Map) {
-	buckets := make([]*bucket, cap)
-	for i := uint32(0); i < cap; i++ {
+func NewMap(capacity uint32, hasher func(key interface{}) uint32) (m *Map) {
+	buckets := make([]*bucket, capacity)
+	for i := uint32(0); i < capacity; i++ {
 		buckets[i] = &bucket{}
 		sentinel := &entry{key: terminal}
 		buckets[i].storeFirst(sentinel)
@@ -94,7 +92,7 @@ func NewMap(cap uint32, hasher func(key interface{}) uint32) (m *Map) {
 // the key exists. Otherwise, it returns the bucket with the given key, the
 // sentinel entry, and false.
 func (m *Map) findEntry(key interface{}) (b *bucket, e *entry, ok bool) {
-	i := m.hasher(key) % NumOfBuckets(m)
+	i := m.hasher(key) % uint32(len(m.buckets))
 	b = m.buckets[i]
 	e = b.loadFirst()
 
@@ -125,11 +123,15 @@ func (m *Map) Load(key interface{}) (value interface{}, ok bool) {
 func (m *Map) Store(key, value interface{}) {
 	if b, e, ok := m.findEntry(key); ok {
 		if v := e.loadValue(); v == deleted {
-			m.numOfDeleted--
+			m.statDeleted--
 		}
 		e.storeValue(value) // linearization point
 	} else {
-		m.numOfEntries++
+		m.statMapSize++
+		b.statEntries++
+		if b.statEntries > m.statLargest {
+			m.statLargest++
+		}
 		newEntry := &entry{key: key}
 		newEntry.storeValue(value)
 		newEntry.storeNext(b.loadFirst())
@@ -141,7 +143,7 @@ func (m *Map) Store(key, value interface{}) {
 func (m *Map) Delete(key interface{}) {
 	if _, e, ok := m.findEntry(key); ok {
 		if v := e.loadValue(); v != deleted {
-			m.numOfDeleted++
+			m.statDeleted++
 		}
 		e.storeValue(deleted) // linearization point
 	}
