@@ -10,31 +10,34 @@ import (
 // Map is a non-resizable hash map. A single update operation and multiple read
 // operations can be executed concurrently on the map, while multiple update
 // operations cannot. In other words, only update operations need an external
-// synchronization. Store and Delete are update operations and Load and Range
-// are read operations.
+// synchronization.
+//
+// Store and Delete are update operations and Load and Range are read
+// operations. StatBuckets and StatEntries are considered to be write
+// operations, while they do not modify the map.
 type Map struct {
-	hasher      func(key interface{}) (hash uint32)
-	buckets     []*bucket
-	statLargest uint32
-	statMapSize uint32
-	statDeleted uint32
+	hasher        func(key interface{}) (hash uint32)
+	buckets       []*bucket
+	numOfEntries  uint
+	numOfDeleted  uint
+	largestBucket uint
 }
 
 // StatBuckets returns the number of buckets and the number of keys in the
 // largest bucket.
-func (m *Map) StatBuckets() (capacity, largest uint32) {
-	return uint32(len(m.buckets)), m.statLargest
+func (m *Map) StatBuckets() (capacity, largest uint) {
+	return uint(len(m.buckets)), m.largestBucket
 }
 
 // StatEntries returns the number of keys physically existing in the map and
 // the number of logically deleted keys.
-func (m *Map) StatEntries() (mapSize, deleted uint32) {
-	return m.statMapSize, m.statDeleted
+func (m *Map) StatEntries() (mapSize, deleted uint) {
+	return m.numOfEntries, m.numOfDeleted
 }
 
 type bucket struct {
-	first       unsafe.Pointer // *entry
-	statEntries uint32
+	first        unsafe.Pointer // *entry
+	numOfEntries uint
 }
 
 type entry struct {
@@ -72,20 +75,16 @@ func (e *entry) storeNext(next *entry) {
 	atomic.StorePointer(&e.next, unsafe.Pointer(next))
 }
 
-// NewMap returns an empty hash map that maintain the number cap of buckets.
-// The map uses the given hash function internally.
-func NewMap(capacity uint32, hasher func(key interface{}) uint32) (m *Map) {
+// NewMap returns an empty hash map that maintain the given number of buckets.
+// The function hasher is used to hash keys.
+func NewMap(capacity uint, hasher func(key interface{}) uint32) (m *Map) {
 	buckets := make([]*bucket, capacity)
-	for i := uint32(0); i < capacity; i++ {
+	for i := uint(0); i < capacity; i++ {
 		buckets[i] = &bucket{}
 		sentinel := &entry{key: terminal}
 		buckets[i].storeFirst(sentinel)
 	}
-
-	return &Map{
-		hasher:  hasher,
-		buckets: buckets,
-	}
+	return &Map{hasher: hasher, buckets: buckets}
 }
 
 // findEntry returns the bucket and the entry with the given key and true if
@@ -123,14 +122,14 @@ func (m *Map) Load(key interface{}) (value interface{}, ok bool) {
 func (m *Map) Store(key, value interface{}) {
 	if b, e, ok := m.findEntry(key); ok {
 		if v := e.loadValue(); v == deleted {
-			m.statDeleted--
+			m.numOfDeleted--
 		}
 		e.storeValue(value) // linearization point
 	} else {
-		m.statMapSize++
-		b.statEntries++
-		if b.statEntries > m.statLargest {
-			m.statLargest++
+		m.numOfEntries++
+		b.numOfEntries++
+		if b.numOfEntries > m.largestBucket {
+			m.largestBucket++
 		}
 		newEntry := &entry{key: key}
 		newEntry.storeValue(value)
@@ -143,7 +142,7 @@ func (m *Map) Store(key, value interface{}) {
 func (m *Map) Delete(key interface{}) {
 	if _, e, ok := m.findEntry(key); ok {
 		if v := e.loadValue(); v != deleted {
-			m.statDeleted++
+			m.numOfDeleted++
 		}
 		e.storeValue(deleted) // linearization point
 	}
