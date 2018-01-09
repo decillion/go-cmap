@@ -1,5 +1,4 @@
-// Package hmap implements a non-resizable concurrency-aware hash map. The
-// package is intended to used as a building block of other packages.
+// Package hmap implements a non-resizable concurrency-aware hash map.
 package hmap
 
 import (
@@ -21,18 +20,6 @@ type Map struct {
 	numOfEntries  uint
 	numOfDeleted  uint
 	largestBucket uint
-}
-
-// StatBuckets returns the number of buckets and the number of keys in the
-// largest bucket.
-func (m *Map) StatBuckets() (capacity, largest uint) {
-	return uint(len(m.buckets)), m.largestBucket
-}
-
-// StatEntries returns the number of keys physically existing in the map and
-// the number of logically deleted keys.
-func (m *Map) StatEntries() (mapSize, deleted uint) {
-	return m.numOfEntries, m.numOfDeleted
 }
 
 type bucket struct {
@@ -73,6 +60,18 @@ func (e *entry) loadNext() (next *entry) {
 
 func (e *entry) storeNext(next *entry) {
 	atomic.StorePointer(&e.next, unsafe.Pointer(next))
+}
+
+// StatBuckets returns the number of buckets and the number of keys in the
+// largest bucket.
+func (m *Map) StatBuckets() (capacity, largest uint) {
+	return uint(len(m.buckets)), m.largestBucket
+}
+
+// StatEntries returns the number of keys physically existing in the map and
+// the number of logically deleted keys.
+func (m *Map) StatEntries() (mapSize, deleted uint) {
+	return m.numOfEntries, m.numOfDeleted
 }
 
 // NewMap returns an empty hash map that maintain the given number of buckets.
