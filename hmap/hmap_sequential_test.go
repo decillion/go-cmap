@@ -7,7 +7,7 @@ import (
 	"testing/quick"
 
 	"github.com/OneOfOne/cmap/hashers"
-	"github.com/decillion/go-hmap"
+	"github.com/decillion/go-cmap/hmap"
 )
 
 const (
