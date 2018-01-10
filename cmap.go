@@ -17,8 +17,8 @@ const (
 	maxBucketSize = 12
 	minMapSize    = iniCapacity * midLoadFactor
 
-	can    = 0
-	cannot = 1
+	possible   = 0
+	impossible = 1
 )
 
 type Map struct {
@@ -72,19 +72,19 @@ func (m *Map) Delete(key interface{}) {
 // the function returns false.
 func (m *Map) Range(f func(key, value interface{}) bool) {
 	m.mu.Lock() // To ensure that no other process concurrently resizes the map.
-	atomic.StoreUint32(&m.resize, cannot)
+	atomic.StoreUint32(&m.resize, impossible)
 	m.mu.Unlock()
 
 	hm := m.hm.Load().(*hmap.Map)
 	hm.Range(f)
 
-	atomic.StoreUint32(&m.resize, can)
+	atomic.StoreUint32(&m.resize, possible)
 }
 
 // This method can only be issued inside the critical section.
 func (m *Map) resizeIfNeeded() {
 	resize := atomic.LoadUint32(&m.resize)
-	if resize == cannot {
+	if resize == impossible {
 		return
 	}
 
