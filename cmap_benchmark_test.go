@@ -74,12 +74,14 @@ func Benchmark_ReadMostly_UnstableKey(b *testing.B) {
 			var oldestKey uint32
 			for pb.Next() {
 				i := int(atomic.AddUint32(&id, 1)) % entries
-				if i%20 == 0 {
-					key := int(atomic.AddUint32(&newestKey, 1))
-					m.Store(key, struct{}{})
-				} else if i%20 == 10 {
-					key := int(atomic.AddUint32(&oldestKey, 1)) - 1
-					m.Delete(key)
+				if i%10 == 0 {
+					if i%20 == 0 {
+						key := int(atomic.AddUint32(&newestKey, 1))
+						m.Store(key, struct{}{})
+					} else {
+						key := int(atomic.AddUint32(&oldestKey, 1)) - 1
+						m.Delete(key)
+					}
 				} else {
 					offset := int(atomic.LoadUint32(&oldestKey))
 					m.Load(i + offset)

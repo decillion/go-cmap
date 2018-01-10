@@ -14,13 +14,14 @@ const (
 	minLoadFactor = 2
 	midLoadFactor = 4
 	maxLoadFactor = 6
-	maxBucketSize = 12
+	maxBucketSize = 18
 	minMapSize    = iniCapacity * midLoadFactor
 
 	possible   = 0
 	impossible = 1
 )
 
+// Map is a concurrent map.
 type Map struct {
 	mu     sync.Mutex
 	hm     atomic.Value // *hmap.Map
@@ -89,23 +90,32 @@ func (m *Map) resizeIfNeeded() {
 	}
 
 	h := m.hm.Load().(*hmap.Map)
-	entries, _ := h.StatEntries()
+	entries, deleted := h.StatEntries()
 	buckets, largest := h.StatBuckets()
 	if entries < minMapSize {
 		return
 	}
 	LoadFactor := float32(entries) / float32(buckets)
-	tooSmallBuckets := LoadFactor > minLoadFactor
+	tooSmallBuckets := LoadFactor > maxLoadFactor
+	// tooLargeBuckets := LoadFactor < minLoadFactor
+	tooManyDeleted := entries < 5*deleted
 	bucketOverflow := largest > maxBucketSize
 
+	var newCapacity uint
 	if tooSmallBuckets || bucketOverflow {
-		newMapCap := 2*buckets - 1
-		newMap := hmap.NewMap(newMapCap, m.hasher)
-		oldMap := m.hm.Load().(*hmap.Map)
-		oldMap.Range(func(k, v interface{}) bool {
-			newMap.Store(k, v)
-			return true
-		})
-		m.hm.Store(newMap)
+		newCapacity = 2*buckets - 1
+	} else if tooManyDeleted {
+		newCapacity = (entries - deleted) / minLoadFactor
+	} else {
+		return
 	}
+	newMap := hmap.NewMap(newCapacity, m.hasher)
+	oldMap := m.hm.Load().(*hmap.Map)
+	oldMap.Range(func(k, v interface{}) bool {
+		newMap.Store(k, v)
+		return true
+	})
+	m.hm.Store(newMap)
+
+	// fmt.Println(buckets, largest, entries, deleted)
 }
