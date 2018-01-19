@@ -16,17 +16,14 @@ const (
 	maxLoadFactor = 6
 	maxBucketSize = 18
 	minMapSize    = iniCapacity * midLoadFactor
-
-	possible   = 0
-	impossible = 1
 )
 
 // Map is a concurrent map.
 type Map struct {
-	mu     sync.Mutex
-	hm     atomic.Value // *hmap.Map
-	resize uint32
-	hasher func(key interface{}) uint32
+	mu       sync.Mutex
+	hm       atomic.Value // *hmap.Map
+	inResize int32
+	hasher   func(key interface{}) uint32
 }
 
 // DefaultHasher is a hash function for a value of an arbitrary type. It is not
@@ -73,19 +70,19 @@ func (m *Map) Delete(key interface{}) {
 // the function returns false.
 func (m *Map) Range(f func(key, value interface{}) bool) {
 	m.mu.Lock() // To ensure that no other process concurrently resizes the map.
-	atomic.StoreUint32(&m.resize, impossible)
+	atomic.AddInt32(&m.inResize, 1)
 	m.mu.Unlock()
 
 	hm := m.hm.Load().(*hmap.Map)
 	hm.Range(f)
 
-	atomic.StoreUint32(&m.resize, possible)
+	atomic.AddInt32(&m.inResize, -1)
 }
 
 // This method can only be issued inside the critical section.
 func (m *Map) resizeIfNeeded() {
-	resize := atomic.LoadUint32(&m.resize)
-	if resize == impossible {
+	inResize := atomic.LoadInt32(&m.inResize)
+	if inResize != 0 {
 		return
 	}
 
@@ -97,7 +94,6 @@ func (m *Map) resizeIfNeeded() {
 	}
 	LoadFactor := float32(entries) / float32(buckets)
 	tooSmallBuckets := LoadFactor > maxLoadFactor
-	// tooLargeBuckets := LoadFactor < minLoadFactor
 	tooManyDeleted := entries < 5*deleted
 	bucketOverflow := largest > maxBucketSize
 
@@ -116,6 +112,4 @@ func (m *Map) resizeIfNeeded() {
 		return true
 	})
 	m.hm.Store(newMap)
-
-	// fmt.Println(buckets, largest, entries, deleted)
 }
